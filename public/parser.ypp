@@ -1,0 +1,577 @@
+%{
+    #include <cstdio>
+    #include <cstdlib>
+
+    #include "ast.hpp"
+    #include "primitive.hpp"
+    #include "symtab.hpp"
+
+    #define YYDEBUG 1
+
+    extern Program_ptr ast;
+    int yylex(void);
+    void yyerror(const char *);
+%}
+
+/* Enables verbose error messages */
+%error-verbose
+
+/** WRITE ME:
+ *  - Put all your token definitions here
+ *  - Put all your type definitions here
+ *  - Put all your precedence/associativity rules here
+ */
+
+%left T_OR T_AND T_LESSTHAN T_LESSTHANOREQ T_GREATERTHAN T_GREATERTHANOREQ T_NOTEQUAL T_ISEQUAL '+' '-'
+%left T_ID1 T_STRING
+%right T_NOT
+%start File
+
+%token T_INTEGER_DEC T_INTTYPE T_INTPTRTYPE
+%token T_STRINGTYPE T_CHARPTRTYPE T_BOOLTYPE
+%token T_IF T_ELSE T_WHILE T_VAR T_PROCEDURE
+%token T_NULLTYPE T_RETURN T_ID1
+%token T_ASSIGN T_LESSTHAN T_LESSTHANOREQ
+%token T_ISEQUAL T_GREATERTHAN T_GREATERTHANOREQ
+%token T_TRUE T_FALSE T_OR T_AND T_NOT T_NOTEQUAL
+%token T_INTEGER_BIN T_INTEGER_OCT T_INTEGER_HEX 
+%token T_STRING T_CHAR T_CHARTYPE
+
+%%
+
+File:   Func  
+    {
+        ast = new ProgramImpl($1.u_proc_list);
+        //std::printf("success!\n");
+    }  
+    ; 
+
+
+Func:      Func T_PROCEDURE T_ID '(' FuncVarDec ')' T_RETURN VarType Body  
+        {
+            ($1.u_proc_list)->push_back(new ProcImpl($3.u_symname, 
+                                                     $5.u_decl_list, 
+                                                     $8.u_type, 
+                                                     $9.u_procedure_block));
+            $$ = $1;
+        }
+        |   T_PROCEDURE T_ID '(' FuncVarDec ')' T_RETURN VarType Body 
+        {
+            $$.u_proc_list = new std::list<Proc_ptr>();
+            ($$.u_proc_list)->push_back( new ProcImpl($2.u_symname, 
+                                                      $4.u_decl_list, 
+                                                      $7.u_type, 
+                                                      $8.u_procedure_block));
+        }
+        ;
+
+
+Body:       '{' Func VarDec LowerBod Return '}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( $2.u_proc_list, 
+                                                            $3.u_decl_list, 
+                                                            $4.u_stat_list,
+                                                            $5.u_return_stat);
+        }
+        |   '{' VarDec LowerBod Return '}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( new std::list<Proc_ptr>(), 
+                                                            $2.u_decl_list, 
+                                                            $3.u_stat_list,
+                                                            $4.u_return_stat);
+        }
+        |   '{' Func LowerBod Return'}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( $2.u_proc_list, 
+                                                            new std::list<Decl_ptr>(), 
+                                                            $3.u_stat_list,
+                                                            $4.u_return_stat);
+        }
+        |   '{' LowerBod Return'}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( new std::list<Proc_ptr>(), 
+                                                            new std::list<Decl_ptr>(), 
+                                                            $2.u_stat_list,
+                                                            $3.u_return_stat);
+        }
+        |   '{' Func VarDec Return  '}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( $2.u_proc_list, 
+                                                            $3.u_decl_list, 
+                                                            new std::list<Stat_ptr>(),
+                                                            $4.u_return_stat);
+        }
+        |   '{' VarDec Return  '}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( new std::list<Proc_ptr>, 
+                                                            $2.u_decl_list, 
+                                                            new std::list<Stat_ptr>(),
+                                                            $3.u_return_stat);
+        }
+        |   '{' Func Return '}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( $2.u_proc_list, 
+                                                            new std::list<Decl_ptr>(), 
+                                                            new std::list<Stat_ptr>(),
+                                                            $3.u_return_stat);
+        }
+        |   '{' Return '}'
+        {
+            $$.u_procedure_block = new Procedure_blockImpl( new std::list<Proc_ptr>(), 
+                                                            new std::list<Decl_ptr>(), 
+                                                            new std::list<Stat_ptr>(),
+                                                            $2.u_return_stat);
+        }
+        ;
+
+Body1:      '{' VarDec LowerBod '}'
+        {
+            $$.u_stat = new CodeBlock(new Nested_blockImpl($2.u_decl_list, 
+                                      $3.u_stat_list));
+        }
+        |   '{' LowerBod '}'
+        {
+            $$.u_stat = new CodeBlock(new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                           $2.u_stat_list));
+        }
+        |   '{' VarDec  '}'
+        {
+            $$.u_stat = new CodeBlock(new Nested_blockImpl($2.u_decl_list, 
+                                      new std::list<Stat_ptr>));
+        }
+        |   '{''}'
+        {
+            $$.u_stat = new CodeBlock(new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                           new std::list<Stat_ptr>));
+        }
+        ;
+
+Return: T_RETURN Expr ';'
+      {
+        $$.u_return_stat = new Return($2.u_expr);
+      }
+        ;
+
+
+LowerBod :      LowerBod Logic
+            {
+                ($1.u_stat_list)->push_back($2.u_stat);
+                $$ = $1;
+            }
+            |   LowerBod Statement
+            {
+                ($1.u_stat_list)->push_back($2.u_stat);
+                $$ = $1;
+            }
+            |   LowerBod Body1
+            {
+                ($1.u_stat_list)->push_back($2.u_stat);
+                $$ = $1;
+            } 
+            |   Logic
+            {
+                $$.u_stat_list = new std::list<Stat_ptr>();
+                ($$.u_stat_list)->push_back($1.u_stat);
+            }
+            |   Statement
+            {
+                $$.u_stat_list = new std::list<Stat_ptr>();
+                ($$.u_stat_list)->push_back($1.u_stat);
+            }
+            |   Body1
+            {
+                $$.u_stat_list = new std::list<Stat_ptr>();
+                ($$.u_stat_list)->push_back($1.u_stat);
+            }
+            ;
+
+            
+Num:            T_INTEGER_OCT
+            {
+                $$.u_primitive = new Primitive(yylval.u_base_int);
+            }
+            |   T_INTEGER_HEX
+            {
+                $$.u_primitive = new Primitive(yylval.u_base_int);
+            }
+            |   T_INTEGER_DEC
+            {
+                $$.u_primitive = new Primitive(yylval.u_base_int);
+            }
+            |   T_INTEGER_BIN
+            {
+                $$.u_primitive = new Primitive(yylval.u_base_int);
+            }
+            ;
+
+T_ID:    T_ID1
+    {
+        $$.u_symname = new SymName(yylval.u_base_charptr); 
+    }
+    ;
+
+T_ID_ARRAYELEM: T_ID1 '[' Expr ']'
+              { 
+                $$.u_lhs = new ArrayElement( new SymName($1.u_base_charptr), 
+                                             $3.u_expr);
+              }
+              ;
+
+T_ID_ARRAYELEM1: T_ID1 '[' Expr ']'
+               {
+                    $$.u_expr = new ArrayAccess( new SymName($1.u_base_charptr), 
+                                                 $3.u_expr);
+               }
+
+
+VarType :       T_INTTYPE
+            { $$.u_type = new TInteger();}
+            |   T_INTPTRTYPE
+            { $$.u_type = new TIntPtr();}
+            |   T_STRINGTYPE '[' Num ']'
+            { $$.u_type = new TString($3.u_primitive);}
+            |   T_CHARPTRTYPE
+            { $$.u_type = new TCharPtr();}
+            |   T_BOOLTYPE
+            { $$.u_type = new TBoolean();}
+            |   T_CHARTYPE
+            { $$.u_type = new TCharacter();}
+            ;
+FuncVarDec:     FuncVarDec1
+            {
+                $$.u_decl_list = $1.u_decl_list;
+            }                      
+            |
+            {
+                $$.u_decl_list = new std::list<Decl_ptr>();
+            }
+            ;
+FuncVarDec1:    MultiVarsDec VarType
+            {
+                $$.u_decl_list = new std::list<Decl_ptr>();
+                ($$.u_decl_list)->push_back(new DeclImpl($1.u_symname_list,
+                                                         $2.u_type));
+            } 
+            |   FuncVarDec1 ';' MultiVarsDec VarType
+            {
+                ($1.u_decl_list)->push_back(new DeclImpl($3.u_symname_list,
+                                                         $4.u_type));
+                $$ = $1;
+            }
+            ;
+
+VarDec :    T_VAR MultiVarsDec VarType ';'
+        {
+            $$.u_decl_list = new std::list<Decl_ptr>();
+            ($$.u_decl_list)->push_back(new DeclImpl($2.u_symname_list,
+                                                     $3.u_type));
+        }
+        |   VarDec T_VAR MultiVarsDec VarType ';'
+        {
+            ($1.u_decl_list)->push_back(new DeclImpl($3.u_symname_list,
+                                                     $4.u_type));
+            $$ = $1;
+        }
+        ;
+
+MultiVarsDec: MultiVarsDec MultiVarsDec1
+            {
+                ($1.u_symname_list)->push_back($2.u_symname);
+                $$ = $1;
+            }
+            |
+            {
+                $$.u_symname_list = new std::list<SymName_ptr>();
+            }
+            ; 
+
+MultiVarsDec1: T_ID ',' 
+            {
+                $$.u_symname = $1.u_symname;
+            } 
+            |   T_ID ':'
+            {
+                $$.u_symname = $1.u_symname;
+            }
+
+Statement:      Assign ';'
+            {
+                $$.u_stat = $1.u_stat;
+            }
+            |   FuncStatement ';'
+            {
+                $$.u_stat = $1.u_stat;
+            }
+            ;
+
+
+
+Assign:         T_ID_ARRAYELEM T_ASSIGN Expr
+            {
+                $$.u_stat = new Assignment($1.u_lhs, $3.u_expr);
+            }
+            |   T_ID T_ASSIGN Expr
+            {
+                $$.u_stat = new Assignment(new Variable($1.u_symname), $3.u_expr);
+            }
+            |   T_ID T_ASSIGN T_STRING
+            {
+                $$.u_stat = new StringAssignment(new Variable($1.u_symname), 
+                                                 new StringPrimitive(yylval.u_base_charptr));
+            }
+            | '^' T_ID T_ASSIGN Expr
+            {
+                $$.u_stat = new Assignment(new DerefVariable($2.u_symname), 
+                                           $4.u_expr);
+            }  
+            ;
+
+Expr:   Expr '+' Term
+    {
+        $$.u_expr = new Plus($1.u_expr, $3.u_expr);
+    }
+    |   Expr '-' Term
+    {
+        $$.u_expr = new Minus($1.u_expr, $3.u_expr);
+    }
+    |   Term
+    {
+        $$.u_expr = $1.u_expr;
+    }
+    ;        
+
+
+Term:   Term '*' Factor
+    {
+        $$.u_expr = new Times($1.u_expr, $3.u_expr);
+    }
+    |   Term '/' Factor
+    {
+        $$.u_expr = new Div($1.u_expr, $3.u_expr);
+    }
+    |   Term T_AND Factor
+    {
+        $$.u_expr = new And($1.u_expr, $3.u_expr);
+    }
+    |   Term T_OR Factor
+    {
+        $$.u_expr = new Or($1.u_expr, $3.u_expr);
+    }
+    |   Term T_ISEQUAL Factor
+    {
+        $$.u_expr = new Compare($1.u_expr, $3.u_expr);
+    }
+    |   Term T_LESSTHANOREQ Factor
+    {
+        $$.u_expr = new Lteq($1.u_expr, $3.u_expr);
+    }
+    |   Term T_LESSTHAN Factor
+    {
+        $$.u_expr = new Lt($1.u_expr, $3.u_expr);
+    }
+    |   Term T_GREATERTHAN Factor
+    {
+        $$.u_expr = new Gt($1.u_expr, $3.u_expr);
+    }
+    |   Term T_GREATERTHANOREQ Factor
+    {
+        $$.u_expr = new Gteq($1.u_expr, $3.u_expr);
+    }
+    |   Term T_NOTEQUAL Factor
+    {
+        $$.u_expr = new Noteq($1.u_expr, $3.u_expr);
+    }
+    |   Factor 
+    {
+        $$.u_expr = $1.u_expr;
+    }   
+    ; 
+
+
+
+
+Factor:     '(' Expr ')'
+        {
+            $$.u_expr = $2.u_expr;
+        }
+        |   Num
+        {
+            $$.u_expr = new IntLit($1.u_primitive);
+        }
+        |   T_FALSE
+        {
+            $$.u_expr = new BoolLit(new Primitive(yylval.u_base_int));
+        }
+        |   T_TRUE
+        {
+            $$.u_expr = new BoolLit(new Primitive(yylval.u_base_int));
+        }
+        |   T_ID
+        {
+            $$.u_expr = new Ident($1.u_symname);
+        }
+        |   T_ID_ARRAYELEM1
+        {
+            $$.u_expr = $1.u_expr;
+        }
+        |   T_CHAR
+        {
+            $$.u_expr = new CharLit(new Primitive(yylval.u_base_int));
+        }
+        |   '-' Factor
+        {
+            $$.u_expr = new Uminus($2.u_expr);
+        }
+        |   '^' Factor
+        {
+            $$.u_expr = new Deref($2.u_expr);
+        }
+        |   '+' Factor
+        {
+            $$.u_expr = $2.u_expr;
+        }
+        |   '&' Factor
+        {
+            $$.u_expr = new AddressOf($2.u_lhs);
+        }
+        |   '|' Expr '|'
+        {
+            $$.u_expr = new AbsoluteValue($2.u_expr);
+        }
+        |   T_NOT Factor
+        {
+            $$.u_expr = new Not($2.u_expr);
+        }
+        |   T_NULLTYPE
+        {
+            $$.u_expr = new NullLit();
+        }
+        ;
+
+FuncStatement:  T_ID T_ASSIGN T_ID '(' FuncExpr1 ')'
+             {
+                $$.u_stat = new Call( new Variable($1.u_symname), $3.u_symname, $5.u_expr_list);
+             }
+             |  T_ID_ARRAYELEM T_ASSIGN T_ID '(' FuncExpr1 ')'
+             {
+                $$.u_stat = new Call( $1.u_lhs, $3.u_symname, $5.u_expr_list);
+             }
+             ;
+
+FuncExpr1:      FuncExpr
+            {
+                $$.u_expr_list = $1.u_expr_list;
+            }
+            |
+            {
+                $$.u_expr_list = new std::list<Expr_ptr>();
+            }
+            ;
+FuncExpr:   Expr ',' FuncExpr
+        {
+            ($3.u_expr_list)->push_back($1.u_expr);
+            $$ = $3
+        }
+        |   Expr
+        {
+            $$.u_expr_list = new std::list<Expr_ptr>();
+            ($$.u_expr_list)->push_back($1.u_expr);
+        }
+        ;
+
+Logic :     T_IF '(' Expr ')' '{' LowerBod '}'
+        {
+            $$.u_stat = new IfNoElse($3.u_expr, 
+                                     new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                          $6.u_stat_list));
+        }
+        |   T_IF '(' Expr ')' '{' VarDec LowerBod '}'
+        {
+            $$.u_stat = new IfNoElse($3.u_expr, 
+                                     new Nested_blockImpl($6.u_decl_list, 
+                                                          $7.u_stat_list));
+        }
+        |   T_IF '(' Expr ')' '{' LowerBod '}' Else
+        {
+            $$.u_stat = new IfWithElse($3.u_expr, 
+                                       new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                            $6.u_stat_list),
+                                       $8.u_nested_block);
+        }
+        |   T_IF '(' Expr ')' '{' VarDec LowerBod '}' Else
+        {
+            $$.u_stat = new IfWithElse($3.u_expr, 
+                                       new Nested_blockImpl($6.u_decl_list, 
+                                                            $7.u_stat_list),
+                                       $9.u_nested_block);
+        }
+        |   T_WHILE '(' Expr ')'  '{' VarDec LowerBod '}'
+        {
+            $$.u_stat = new WhileLoop($3.u_expr,
+                                      new Nested_blockImpl($6.u_decl_list,
+                                                           $7.u_stat_list));
+        }
+        |   T_WHILE '(' Expr ')'  '{' LowerBod '}'
+        {
+            $$.u_stat = new WhileLoop($3.u_expr,
+                                      new Nested_blockImpl(new std::list<Decl_ptr>,
+                                                           $6.u_stat_list));
+        }
+        |   T_IF '(' Expr ')' '{' '}'
+        {
+            $$.u_stat = new IfNoElse($3.u_expr, 
+                                     new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                          new std::list<Stat_ptr>));
+        }
+        |   T_IF '(' Expr ')' '{' '}' Else
+        {
+            $$.u_stat = new IfWithElse($3.u_expr, 
+                                       new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                            new std::list<Stat_ptr>),
+                                       $7.u_nested_block);
+        }
+        |   T_WHILE '(' Expr ')' '{' '}'
+        {
+            $$.u_stat = new WhileLoop($3.u_expr, 
+                                      new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                           new std::list<Stat_ptr>));
+        }
+        ;
+
+Else :  T_ELSE '{' LowerBod '}'
+     {
+        $$.u_nested_block = new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                 $3.u_stat_list);
+     }
+     |  T_ELSE '{' VarDec '}'
+     {
+        $$.u_nested_block = new Nested_blockImpl($3.u_decl_list, 
+                                                 new std::list<Stat_ptr>);
+     }
+     | T_ELSE '{' VarDec LowerBod '}'
+     {
+        $$.u_nested_block = new Nested_blockImpl($3.u_decl_list,
+                                                 $4.u_stat_list);
+     }
+     | T_ELSE '{' '}'
+     {
+        $$.u_nested_block = new Nested_blockImpl(new std::list<Decl_ptr>, 
+                                                 new std::list<Stat_ptr>);
+     }
+     ;
+
+
+%%
+
+
+/** You shall not pass!
+ *  You should not  have to do or edit anything past this.
+ */
+
+extern int yylineno;
+
+void yyerror(const char *s)
+{
+    fprintf(stderr, "%s at line %d\n", s, yylineno);
+    return;
+}
